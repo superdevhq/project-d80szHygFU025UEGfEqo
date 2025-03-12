@@ -71,6 +71,10 @@ serve(async (req) => {
       );
     }
 
+    // Get options
+    const identifySpeakers = requestData.identifySpeakers === true;
+    const language = requestData.language || null; // Optional language parameter
+
     // Convert the array back to Uint8Array
     const fileData = new Uint8Array(requestData.fileData);
     
@@ -135,6 +139,11 @@ serve(async (req) => {
     formData.append('file', file);
     formData.append('model', 'whisper-1');
     
+    // Add language parameter if provided
+    if (language) {
+      formData.append('language', language);
+    }
+    
     console.log(`Processing file: ${requestData.fileName}, size: ${fileData.length} bytes, type: ${mimeType}, extension: ${originalExtension}`);
     
     // Call OpenAI Whisper API
@@ -189,6 +198,11 @@ serve(async (req) => {
         retryFormData.append('file', mp3File);
         retryFormData.append('model', 'whisper-1');
         
+        // Add language parameter if provided
+        if (language) {
+          retryFormData.append('language', language);
+        }
+        
         try {
           const retryResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
             method: 'POST',
@@ -200,6 +214,25 @@ serve(async (req) => {
           
           if (retryResponse.ok) {
             const retryResult = await retryResponse.json();
+            
+            // If speaker identification is requested, process the transcription
+            if (identifySpeakers) {
+              const processedTranscription = await identifySpeakersInTranscription(retryResult.text, openaiApiKey);
+              return new Response(
+                JSON.stringify({
+                  success: true,
+                  transcription: processedTranscription,
+                  rawTranscription: retryResult.text,
+                  duration: retryResult.duration,
+                  speakersIdentified: true
+                }),
+                {
+                  status: 200,
+                  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                }
+              );
+            }
+            
             return new Response(
               JSON.stringify({
                 success: true,
@@ -245,6 +278,24 @@ serve(async (req) => {
         }),
         {
           status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+    
+    // If speaker identification is requested, process the transcription
+    if (identifySpeakers) {
+      const processedTranscription = await identifySpeakersInTranscription(result.text, openaiApiKey);
+      return new Response(
+        JSON.stringify({
+          success: true,
+          transcription: processedTranscription,
+          rawTranscription: result.text,
+          duration: result.duration,
+          speakersIdentified: true
+        }),
+        {
+          status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
@@ -296,3 +347,56 @@ serve(async (req) => {
     );
   }
 });
+
+/**
+ * Uses GPT to identify different speakers in a transcription
+ * @param {string} transcription - The raw transcription text
+ * @param {string} apiKey - OpenAI API key
+ * @returns {Promise<string>} - Transcription with speaker labels
+ */
+async function identifySpeakersInTranscription(transcription, apiKey) {
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert in analyzing conversations and identifying different speakers. 
+            Your task is to take a raw transcription and format it with speaker labels (Speaker 1, Speaker 2, etc.).
+            Analyze the content, speaking patterns, and context to determine when different people are speaking.
+            Format the output as:
+            
+            Speaker 1: [text]
+            Speaker 2: [text]
+            Speaker 1: [text]
+            
+            Be consistent with speaker numbering throughout the conversation.`
+          },
+          {
+            role: 'user',
+            content: `Here is a raw transcription of a conversation. Please identify the different speakers and format it with speaker labels:\n\n${transcription}`
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 4000
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('Error from GPT API:', await response.text());
+      return transcription; // Return original if processing fails
+    }
+
+    const result = await response.json();
+    return result.choices[0].message.content;
+  } catch (error) {
+    console.error('Error identifying speakers:', error);
+    return transcription; // Return original if processing fails
+  }
+}
