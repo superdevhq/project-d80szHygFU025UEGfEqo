@@ -25,7 +25,7 @@ const SUPPORTED_FORMATS = [
 
 // Language options
 const LANGUAGE_OPTIONS = [
-  { value: "", label: "Auto-detect" },
+  { value: "auto", label: "Auto-detect" },
   { value: "en", label: "English" },
   { value: "he", label: "Hebrew (עברית)" },
   { value: "ar", label: "Arabic (العربية)" },
@@ -49,7 +49,7 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState("upload");
   const [fileError, setFileError] = useState<string | null>(null);
   const [identifySpeakers, setIdentifySpeakers] = useState(true);
-  const [language, setLanguage] = useState("");
+  const [language, setLanguage] = useState("auto");
   const [speakersIdentified, setSpeakersIdentified] = useState(false);
 
   // Check if file format is supported
@@ -118,7 +118,7 @@ const Index = () => {
             fileType: file.type || "audio/mp3", // Fallback type for mobile
             fileData: Array.from(fileUint8Array),
             identifySpeakers: identifySpeakers,
-            language: language || undefined
+            language: language === "auto" ? undefined : language
           }
         });
 
@@ -154,7 +154,7 @@ const Index = () => {
             fileType: file.type || "audio/mp3",
             fileData: Array.from(optimizedArray),
             identifySpeakers: identifySpeakers,
-            language: language || undefined
+            language: language === "auto" ? undefined : language
           }
         });
 
