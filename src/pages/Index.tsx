@@ -1,13 +1,17 @@
 
 import { useState } from "react";
-import { FileAudio, FileVideo, Upload, Wand2 } from "lucide-react";
+import { FileAudio, FileVideo, Upload, Wand2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import FileUploader from "@/components/FileUploader";
 import TranscriptionResult from "@/components/TranscriptionResult";
+import SpeakerTranscription from "@/components/SpeakerTranscription";
 
 // Maximum file size in bytes (10MB - to avoid memory issues)
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -19,13 +23,34 @@ const SUPPORTED_FORMATS = [
   'mp3', 'mp4', 'm4a', 'wav', 'webm', 'ogg', 'flac', 'mpeg', 'mpga', 'oga'
 ];
 
+// Language options
+const LANGUAGE_OPTIONS = [
+  { value: "", label: "Auto-detect" },
+  { value: "en", label: "English" },
+  { value: "he", label: "Hebrew (עברית)" },
+  { value: "ar", label: "Arabic (العربية)" },
+  { value: "fr", label: "French (Français)" },
+  { value: "de", label: "German (Deutsch)" },
+  { value: "es", label: "Spanish (Español)" },
+  { value: "it", label: "Italian (Italiano)" },
+  { value: "ja", label: "Japanese (日本語)" },
+  { value: "ko", label: "Korean (한국어)" },
+  { value: "pt", label: "Portuguese (Português)" },
+  { value: "ru", label: "Russian (Русский)" },
+  { value: "zh", label: "Chinese (中文)" },
+];
+
 const Index = () => {
   const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcription, setTranscription] = useState<string | null>(null);
+  const [rawTranscription, setRawTranscription] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("upload");
   const [fileError, setFileError] = useState<string | null>(null);
+  const [identifySpeakers, setIdentifySpeakers] = useState(true);
+  const [language, setLanguage] = useState("");
+  const [speakersIdentified, setSpeakersIdentified] = useState(false);
 
   // Check if file format is supported
   const isFormatSupported = (fileName: string) => {
@@ -65,12 +90,17 @@ const Index = () => {
 
     setIsTranscribing(true);
     setFileError(null);
+    setTranscription(null);
+    setRawTranscription(null);
+    setSpeakersIdentified(false);
     
     try {
       // Show a toast to indicate processing has started
       toast({
         title: "Processing file",
-        description: "Your file is being transcribed. This may take a moment...",
+        description: identifySpeakers 
+          ? "Your file is being transcribed with speaker identification. This may take a moment..."
+          : "Your file is being transcribed. This may take a moment...",
       });
       
       // Convert file to ArrayBuffer
@@ -86,7 +116,9 @@ const Index = () => {
           body: {
             fileName: file.name,
             fileType: file.type || "audio/mp3", // Fallback type for mobile
-            fileData: Array.from(fileUint8Array)
+            fileData: Array.from(fileUint8Array),
+            identifySpeakers: identifySpeakers,
+            language: language || undefined
           }
         });
 
@@ -102,6 +134,10 @@ const Index = () => {
 
         // Set the transcription result
         setTranscription(data.transcription);
+        if (data.rawTranscription) {
+          setRawTranscription(data.rawTranscription);
+        }
+        setSpeakersIdentified(data.speakersIdentified || false);
       } else {
         // For larger files, reduce the size before sending
         toast({
@@ -116,7 +152,9 @@ const Index = () => {
           body: {
             fileName: file.name,
             fileType: file.type || "audio/mp3",
-            fileData: Array.from(optimizedArray)
+            fileData: Array.from(optimizedArray),
+            identifySpeakers: identifySpeakers,
+            language: language || undefined
           }
         });
 
@@ -132,12 +170,18 @@ const Index = () => {
 
         // Set the transcription result
         setTranscription(data.transcription);
+        if (data.rawTranscription) {
+          setRawTranscription(data.rawTranscription);
+        }
+        setSpeakersIdentified(data.speakersIdentified || false);
         
         // Add a note that only part of the file was transcribed
         if (file.size > MAX_FILE_SIZE) {
-          setTranscription((prev) => 
-            prev + "\n\n[Note: This is a partial transcription. The file was too large to process completely.]"
-          );
+          const note = "\n\n[Note: This is a partial transcription. The file was too large to process completely.]";
+          setTranscription((prev) => prev + note);
+          if (rawTranscription) {
+            setRawTranscription((prev) => prev + note);
+          }
         }
       }
       
@@ -146,7 +190,9 @@ const Index = () => {
       
       toast({
         title: "Transcription complete",
-        description: "Your file has been successfully transcribed!",
+        description: identifySpeakers 
+          ? "Your file has been successfully transcribed with speaker identification!"
+          : "Your file has been successfully transcribed!",
       });
     } catch (error) {
       console.error('Transcription error:', error);
@@ -173,7 +219,9 @@ const Index = () => {
   const handleFileChange = (uploadedFile: File | null) => {
     setFile(uploadedFile);
     setTranscription(null);
+    setRawTranscription(null);
     setFileError(null);
+    setSpeakersIdentified(false);
     
     if (uploadedFile) {
       // Check file size immediately
@@ -249,7 +297,7 @@ const Index = () => {
                     Supported formats: MP3, MP4, WAV, M4A, and more (max {MAX_FILE_SIZE / (1024 * 1024)}MB)
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-6">
                   <FileUploader 
                     onFileChange={handleFileChange} 
                     file={file}
@@ -261,10 +309,47 @@ const Index = () => {
                   />
                   
                   {fileError && (
-                    <div className="mt-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                    <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
                       {fileError}
                     </div>
                   )}
+                  
+                  <div className="space-y-4 rounded-lg border bg-card p-4">
+                    <h3 className="font-medium">Transcription Options</h3>
+                    
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="speaker-identification">Speaker Identification</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Identify different speakers in the conversation
+                        </p>
+                      </div>
+                      <Switch
+                        id="speaker-identification"
+                        checked={identifySpeakers}
+                        onCheckedChange={setIdentifySpeakers}
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="language-select">Language (Optional)</Label>
+                      <Select value={language} onValueChange={setLanguage}>
+                        <SelectTrigger id="language-select" className="w-full">
+                          <SelectValue placeholder="Auto-detect language" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {LANGUAGE_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Select a language to improve transcription accuracy
+                      </p>
+                    </div>
+                  </div>
                 </CardContent>
                 <CardFooter className="flex justify-between">
                   <Button 
@@ -288,7 +373,11 @@ const Index = () => {
                       </>
                     ) : (
                       <>
-                        <Wand2 className="h-4 w-4" />
+                        {identifySpeakers ? (
+                          <Users className="h-4 w-4" />
+                        ) : (
+                          <Wand2 className="h-4 w-4" />
+                        )}
                         Transcribe
                       </>
                     )}
@@ -298,10 +387,18 @@ const Index = () => {
             </TabsContent>
             
             <TabsContent value="transcription" className="mt-6">
-              <TranscriptionResult 
-                transcription={transcription || ""} 
-                fileName={file?.name || ""}
-              />
+              {speakersIdentified ? (
+                <SpeakerTranscription 
+                  transcription={transcription || ""} 
+                  rawTranscription={rawTranscription || undefined}
+                  fileName={file?.name || ""}
+                />
+              ) : (
+                <TranscriptionResult 
+                  transcription={transcription || ""} 
+                  fileName={file?.name || ""}
+                />
+              )}
             </TabsContent>
           </Tabs>
         </div>
