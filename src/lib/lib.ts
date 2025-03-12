@@ -3,11 +3,22 @@
  * Enhanced data logging utility
  * @param data Any data to log
  * @param tag Optional tag to categorize logs
+ * @param logLevel Optional log level (default: 'info')
  */
-export const logData = (data: any, tag?: string): void => {
+export const logData = (data: any, tag?: string, logLevel: 'info' | 'warn' | 'error' | 'debug' = 'info'): void => {
   const timestamp = new Date().toISOString();
   const tagString = tag ? `[${tag}]` : '';
-  console.log(`[Data Logger ${timestamp}]${tagString}:`, data);
+  const levelEmoji = {
+    'info': 'ℹ️',
+    'warn': '⚠️',
+    'error': '❌',
+    'debug': '🔍'
+  }[logLevel];
+  
+  console[logLevel === 'error' ? 'error' : logLevel === 'warn' ? 'warn' : 'log'](
+    `[Data Logger ${levelEmoji} ${timestamp}]${tagString}:`, 
+    data
+  );
 };
 
 /**
@@ -91,4 +102,49 @@ export const retry = async <T>(
   }
   
   throw lastError!;
+};
+
+/**
+ * OpenAI API configuration
+ */
+export const openAIConfig = {
+  apiKey: process.env.OPENAI_API_KEY || 'your-default-key-here',
+  model: 'gpt-4-turbo',
+  temperature: 0.7,
+  maxTokens: 2000
+};
+
+/**
+ * Update OpenAI API key
+ * @param newApiKey The new API key to use
+ */
+export const updateOpenAIApiKey = (newApiKey: string): void => {
+  if (!newApiKey || newApiKey.trim() === '') {
+    throw new Error('API key cannot be empty');
+  }
+  
+  if (typeof window !== 'undefined') {
+    // Store in localStorage for client-side persistence
+    localStorage.setItem('openai_api_key', newApiKey);
+    logData('OpenAI API key updated and stored in localStorage', 'OpenAI', 'info');
+  }
+  
+  // Update the runtime configuration
+  openAIConfig.apiKey = newApiKey;
+};
+
+/**
+ * Get the current OpenAI API key
+ * @returns The current API key
+ */
+export const getOpenAIApiKey = (): string => {
+  if (typeof window !== 'undefined') {
+    // Try to get from localStorage first
+    const storedKey = localStorage.getItem('openai_api_key');
+    if (storedKey) {
+      return storedKey;
+    }
+  }
+  
+  return openAIConfig.apiKey;
 };
