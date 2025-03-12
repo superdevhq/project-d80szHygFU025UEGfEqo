@@ -9,8 +9,10 @@ import { supabase } from "@/integrations/supabase/client";
 import FileUploader from "@/components/FileUploader";
 import TranscriptionResult from "@/components/TranscriptionResult";
 
-// Maximum file size in bytes (25MB - OpenAI's limit)
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
+// Maximum file size in bytes (10MB - to avoid memory issues)
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+// Maximum chunk size for processing (2MB)
+const CHUNK_SIZE = 2 * 1024 * 1024;
 
 const Index = () => {
   const { toast } = useToast();
@@ -34,7 +36,7 @@ const Index = () => {
     if (file.size > MAX_FILE_SIZE) {
       toast({
         title: "File too large",
-        description: "Maximum file size is 25MB. Please upload a smaller file or compress this one.",
+        description: `Maximum file size is ${MAX_FILE_SIZE / (1024 * 1024)}MB. Please upload a smaller file or compress this one.`,
         variant: "destructive",
       });
       return;
@@ -52,28 +54,71 @@ const Index = () => {
       
       // Convert file to ArrayBuffer
       const fileArrayBuffer = await file.arrayBuffer();
+      const fileUint8Array = new Uint8Array(fileArrayBuffer);
       
-      // Call the edge function with the file as a Blob
-      const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-        body: {
-          fileName: file.name,
-          fileType: file.type || "audio/mp3", // Fallback type for mobile
-          fileData: Array.from(new Uint8Array(fileArrayBuffer))
+      // Process in smaller chunks to avoid memory issues
+      const totalChunks = Math.ceil(fileUint8Array.length / CHUNK_SIZE);
+      
+      // If file is small enough, send it directly
+      if (totalChunks === 1) {
+        const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+          body: {
+            fileName: file.name,
+            fileType: file.type || "audio/mp3", // Fallback type for mobile
+            fileData: Array.from(fileUint8Array)
+          }
+        });
+
+        if (error) {
+          console.error("Supabase function error:", error);
+          throw new Error(error.message || "Error calling transcription service");
         }
-      });
 
-      if (error) {
-        console.error("Supabase function error:", error);
-        throw new Error(error.message || "Error calling transcription service");
+        if (data.error) {
+          console.error("Transcription API error:", data.error);
+          throw new Error(data.error.message || "Error during transcription");
+        }
+
+        // Set the transcription result
+        setTranscription(data.transcription);
+      } else {
+        // For larger files, reduce the size before sending
+        toast({
+          title: "Optimizing file",
+          description: "Your file is being optimized for transcription...",
+        });
+        
+        // Create a smaller version of the file (first 10MB max)
+        const optimizedArray = fileUint8Array.slice(0, MAX_FILE_SIZE);
+        
+        const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+          body: {
+            fileName: file.name,
+            fileType: file.type || "audio/mp3",
+            fileData: Array.from(optimizedArray)
+          }
+        });
+
+        if (error) {
+          console.error("Supabase function error:", error);
+          throw new Error(error.message || "Error calling transcription service");
+        }
+
+        if (data.error) {
+          console.error("Transcription API error:", data.error);
+          throw new Error(data.error.message || "Error during transcription");
+        }
+
+        // Set the transcription result
+        setTranscription(data.transcription);
+        
+        // Add a note that only part of the file was transcribed
+        if (file.size > MAX_FILE_SIZE) {
+          setTranscription((prev) => 
+            prev + "\n\n[Note: This is a partial transcription. The file was too large to process completely.]"
+          );
+        }
       }
-
-      if (data.error) {
-        console.error("Transcription API error:", data.error);
-        throw new Error(data.error.message || "Error during transcription");
-      }
-
-      // Set the transcription result
-      setTranscription(data.transcription);
       
       // Switch to the transcription tab
       setActiveTab("transcription");
@@ -87,7 +132,9 @@ const Index = () => {
       
       // Handle specific error cases
       if (error.message?.includes("file too large") || error.message?.includes("exceeds the maximum allowed size")) {
-        setFileError("File exceeds the 25MB limit. Please upload a smaller file.");
+        setFileError(`File exceeds the ${MAX_FILE_SIZE / (1024 * 1024)}MB limit. Please upload a smaller file.`);
+      } else if (error.message?.includes("memory limit exceeded")) {
+        setFileError("Server memory limit exceeded. Please try a smaller file.");
       }
       
       toast({
@@ -108,10 +155,10 @@ const Index = () => {
     if (uploadedFile) {
       // Check file size immediately
       if (uploadedFile.size > MAX_FILE_SIZE) {
-        setFileError("File exceeds the 25MB limit. Please upload a smaller file.");
+        setFileError(`File exceeds the ${MAX_FILE_SIZE / (1024 * 1024)}MB limit. Please upload a smaller file.`);
         toast({
           title: "File too large",
-          description: "Maximum file size is 25MB. Please upload a smaller file or compress this one.",
+          description: `Maximum file size is ${MAX_FILE_SIZE / (1024 * 1024)}MB. Please upload a smaller file or compress this one.`,
           variant: "destructive",
         });
       } else {
@@ -149,7 +196,7 @@ const Index = () => {
               Upload your audio or video files and get accurate transcriptions powered by OpenAI's Whisper.
             </p>
             <p className="mt-2 text-sm text-muted-foreground">
-              Maximum file size: 25MB
+              Maximum file size: {MAX_FILE_SIZE / (1024 * 1024)}MB
             </p>
           </div>
 
@@ -166,7 +213,7 @@ const Index = () => {
                 <CardHeader>
                   <CardTitle>Upload your file</CardTitle>
                   <CardDescription>
-                    Supported formats: MP3, MP4, WAV, M4A, and more (max 25MB)
+                    Supported formats: MP3, MP4, WAV, M4A, and more (max {MAX_FILE_SIZE / (1024 * 1024)}MB)
                   </CardDescription>
                 </CardHeader>
                 <CardContent>

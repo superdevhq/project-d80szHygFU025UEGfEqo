@@ -7,8 +7,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-// Maximum file size in bytes (25MB - OpenAI's limit)
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
+// Maximum file size in bytes (10MB - to avoid memory issues)
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 serve(async (req) => {
   // Handle CORS preflight request
@@ -25,7 +25,7 @@ serve(async (req) => {
     
     if (!openaiApiKey) {
       return new Response(
-        JSON.stringify({ error: 'OpenAI API key is not configured' }),
+        JSON.stringify({ error: { message: 'OpenAI API key is not configured' } }),
         {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -36,7 +36,7 @@ serve(async (req) => {
     // Only accept POST requests
     if (req.method !== 'POST') {
       return new Response(
-        JSON.stringify({ error: 'Method not allowed' }),
+        JSON.stringify({ error: { message: 'Method not allowed' } }),
         {
           status: 405,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -45,11 +45,22 @@ serve(async (req) => {
     }
 
     // Get the request body
-    const requestData = await req.json();
+    let requestData;
+    try {
+      requestData = await req.json();
+    } catch (e) {
+      return new Response(
+        JSON.stringify({ error: { message: 'Invalid JSON in request body' } }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
     
     if (!requestData.fileData || !requestData.fileName || !requestData.fileType) {
       return new Response(
-        JSON.stringify({ error: 'Missing file data, name, or type' }),
+        JSON.stringify({ error: { message: 'Missing file data, name, or type' } }),
         {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -75,7 +86,24 @@ serve(async (req) => {
       );
     }
     
-    const fileBlob = new Blob([fileData], { type: requestData.fileType });
+    // Create a blob with the file data
+    let fileBlob;
+    try {
+      fileBlob = new Blob([fileData], { type: requestData.fileType });
+    } catch (e) {
+      console.error('Error creating Blob:', e);
+      return new Response(
+        JSON.stringify({ 
+          error: { 
+            message: 'Error processing file data. Memory limit may have been exceeded.' 
+          }
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
     
     // Create a File object from the Blob
     const file = new File([fileBlob], requestData.fileName, { type: requestData.fileType });
@@ -88,20 +116,40 @@ serve(async (req) => {
     console.log(`Processing file: ${requestData.fileName}, size: ${fileData.length} bytes, type: ${requestData.fileType}`);
     
     // Call OpenAI Whisper API
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-      },
-      body: formData,
-    });
+    let response;
+    try {
+      response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+        },
+        body: formData,
+      });
+    } catch (e) {
+      console.error('Error calling OpenAI API:', e);
+      return new Response(
+        JSON.stringify({ 
+          error: { 
+            message: 'Error connecting to OpenAI API. Please try again later.' 
+          }
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
 
     if (!response.ok) {
       let errorData;
       try {
         errorData = await response.json();
       } catch (e) {
-        errorData = { message: await response.text() };
+        try {
+          errorData = { message: await response.text() };
+        } catch (textError) {
+          errorData = { message: `HTTP error ${response.status}` };
+        }
       }
       
       console.error('OpenAI API error:', errorData);
@@ -133,7 +181,23 @@ serve(async (req) => {
     }
 
     // Get the transcription result
-    const result = await response.json();
+    let result;
+    try {
+      result = await response.json();
+    } catch (e) {
+      console.error('Error parsing OpenAI response:', e);
+      return new Response(
+        JSON.stringify({ 
+          error: { 
+            message: 'Error parsing transcription result' 
+          }
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
     
     // Return the transcription
     return new Response(
@@ -150,11 +214,28 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error processing transcription:', error);
     
+    // Check if this is a memory error
+    const errorMessage = error.message || String(error);
+    if (errorMessage.includes('memory') || errorMessage.includes('allocation')) {
+      return new Response(
+        JSON.stringify({
+          error: {
+            message: 'Server memory limit exceeded. Please try a smaller file.',
+            details: errorMessage
+          }
+        }),
+        {
+          status: 507, // Insufficient Storage
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+    
     return new Response(
       JSON.stringify({
         error: {
           message: 'Failed to process transcription',
-          details: error.message || String(error),
+          details: errorMessage,
         }
       }),
       {
