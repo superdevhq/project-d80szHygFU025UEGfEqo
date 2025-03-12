@@ -79,8 +79,25 @@ const FileUploader = ({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  // Separate file input to avoid mobile issues
+  const handleSelectFileClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
   return (
     <div className="w-full">
+      {/* Hidden file input element */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFileInput}
+        accept={getAcceptString()}
+        aria-label="Upload audio or video file"
+      />
+
       {!file ? (
         <div
           className={cn(
@@ -102,17 +119,10 @@ const FileUploader = ({
           </p>
           <Button
             variant="secondary"
-            onClick={() => fileInputRef.current?.click()}
-            className="relative"
+            onClick={handleSelectFileClick}
+            type="button"
           >
             Select File
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="absolute inset-0 cursor-pointer opacity-0"
-              onChange={handleFileInput}
-              accept={getAcceptString()}
-            />
           </Button>
         </div>
       ) : (
@@ -132,7 +142,7 @@ const FileUploader = ({
                 <div>
                   <h4 className="font-medium">{file.name}</h4>
                   <p className="text-sm text-muted-foreground">
-                    {formatFileSize(file.size)} • {file.type}
+                    {formatFileSize(file.size)} • {file.type || "Unknown type"}
                   </p>
                 </div>
                 <Button
@@ -140,6 +150,7 @@ const FileUploader = ({
                   size="icon"
                   className="h-8 w-8 rounded-full"
                   onClick={() => onFileChange(null)}
+                  type="button"
                 >
                   <X className="h-4 w-4" />
                   <span className="sr-only">Remove file</span>

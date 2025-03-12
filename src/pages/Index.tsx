@@ -14,6 +14,7 @@ const Index = () => {
   const [file, setFile] = useState<File | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcription, setTranscription] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("upload");
 
   const handleTranscribe = async () => {
     if (!file) {
@@ -28,6 +29,12 @@ const Index = () => {
     setIsTranscribing(true);
     
     try {
+      // Show a toast to indicate processing has started
+      toast({
+        title: "Processing file",
+        description: "Your file is being transcribed. This may take a moment...",
+      });
+      
       // Convert file to ArrayBuffer
       const fileArrayBuffer = await file.arrayBuffer();
       
@@ -35,7 +42,7 @@ const Index = () => {
       const { data, error } = await supabase.functions.invoke('transcribe-audio', {
         body: {
           fileName: file.name,
-          fileType: file.type,
+          fileType: file.type || "audio/mp3", // Fallback type for mobile
           fileData: Array.from(new Uint8Array(fileArrayBuffer))
         }
       });
@@ -46,6 +53,9 @@ const Index = () => {
 
       // Set the transcription result
       setTranscription(data.transcription);
+      
+      // Switch to the transcription tab
+      setActiveTab("transcription");
       
       toast({
         title: "Transcription complete",
@@ -67,6 +77,13 @@ const Index = () => {
   const handleFileChange = (uploadedFile: File | null) => {
     setFile(uploadedFile);
     setTranscription(null);
+    
+    if (uploadedFile) {
+      toast({
+        title: "File selected",
+        description: `${uploadedFile.name} is ready for transcription.`,
+      });
+    }
   };
 
   return (
@@ -96,7 +113,7 @@ const Index = () => {
             </p>
           </div>
 
-          <Tabs defaultValue="upload" className="w-full">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="upload">Upload</TabsTrigger>
               <TabsTrigger value="transcription" disabled={!transcription}>
@@ -127,6 +144,7 @@ const Index = () => {
                     variant="outline" 
                     onClick={() => handleFileChange(null)}
                     disabled={!file || isTranscribing}
+                    type="button"
                   >
                     Clear
                   </Button>
@@ -134,6 +152,7 @@ const Index = () => {
                     onClick={handleTranscribe} 
                     disabled={!file || isTranscribing}
                     className="gap-2"
+                    type="button"
                   >
                     {isTranscribing ? (
                       <>
