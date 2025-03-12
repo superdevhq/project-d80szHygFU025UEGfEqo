@@ -4,8 +4,8 @@ import { FileAudio, FileVideo, Upload, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import FileUploader from "@/components/FileUploader";
 import TranscriptionResult from "@/components/TranscriptionResult";
 
@@ -15,8 +15,7 @@ const Index = () => {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcription, setTranscription] = useState<string | null>(null);
 
-  // Mock transcription process
-  const handleTranscribe = () => {
+  const handleTranscribe = async () => {
     if (!file) {
       toast({
         title: "No file selected",
@@ -28,20 +27,41 @@ const Index = () => {
 
     setIsTranscribing(true);
     
-    // Simulate API call with timeout
-    setTimeout(() => {
-      // Mock transcription result
-      const mockTranscription = 
-        "This is a mock transcription of your audio file. In the future, this will be replaced with actual transcription from OpenAI's Whisper API. The transcription will include timestamps, speaker identification, and other features depending on the quality of the audio and the capabilities of the model. This is just placeholder text to demonstrate how the UI will look with actual transcription data.";
+    try {
+      // Create form data to send to the edge function
+      const formData = new FormData();
+      formData.append('file', file);
       
-      setTranscription(mockTranscription);
-      setIsTranscribing(false);
+      // Call the edge function
+      const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+        body: formData,
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      // Set the transcription result
+      setTranscription(data.transcription);
       
       toast({
         title: "Transcription complete",
         description: "Your file has been successfully transcribed!",
       });
-    }, 2000);
+    } catch (error) {
+      console.error('Transcription error:', error);
+      
+      toast({
+        title: "Transcription failed",
+        description: error.message || "An error occurred during transcription.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsTranscribing(false);
+    }
   };
 
   const handleFileChange = (uploadedFile: File | null) => {
@@ -61,9 +81,6 @@ const Index = () => {
             <Button variant="outline" size="sm">
               About
             </Button>
-            <Button size="sm">
-              Sign In
-            </Button>
           </div>
         </div>
       </header>
@@ -75,7 +92,7 @@ const Index = () => {
               Audio & Video Transcription
             </h1>
             <p className="mt-4 text-lg text-muted-foreground">
-              Upload your audio or video files and get accurate transcriptions powered by AI.
+              Upload your audio or video files and get accurate transcriptions powered by OpenAI's Whisper.
             </p>
           </div>
 
