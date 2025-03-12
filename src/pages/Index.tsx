@@ -28,16 +28,16 @@ const Index = () => {
     setIsTranscribing(true);
     
     try {
-      // Create form data to send to the edge function
-      const formData = new FormData();
-      formData.append('file', file);
+      // Convert file to ArrayBuffer
+      const fileArrayBuffer = await file.arrayBuffer();
       
-      // Call the edge function
+      // Call the edge function with the file as a Blob
       const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-        body: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        body: {
+          fileName: file.name,
+          fileType: file.type,
+          fileData: Array.from(new Uint8Array(fileArrayBuffer))
+        }
       });
 
       if (error) {

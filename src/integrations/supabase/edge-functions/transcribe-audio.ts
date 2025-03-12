@@ -1,6 +1,5 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -42,13 +41,12 @@ serve(async (req) => {
       );
     }
 
-    // Get the form data from the request
-    const formData = await req.formData();
-    const audioFile = formData.get('file');
+    // Get the request body
+    const requestData = await req.json();
     
-    if (!audioFile || !(audioFile instanceof File)) {
+    if (!requestData.fileData || !requestData.fileName || !requestData.fileType) {
       return new Response(
-        JSON.stringify({ error: 'No audio file provided' }),
+        JSON.stringify({ error: 'Missing file data, name, or type' }),
         {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -56,24 +54,17 @@ serve(async (req) => {
       );
     }
 
+    // Convert the array back to Uint8Array and then to a Blob
+    const fileData = new Uint8Array(requestData.fileData);
+    const fileBlob = new Blob([fileData], { type: requestData.fileType });
+    
+    // Create a File object from the Blob
+    const file = new File([fileBlob], requestData.fileName, { type: requestData.fileType });
+
     // Prepare the form data for OpenAI API
-    const openaiFormData = new FormData();
-    openaiFormData.append('file', audioFile);
-    openaiFormData.append('model', 'whisper-1');
-    
-    // Optional parameters
-    const language = formData.get('language');
-    if (language) {
-      openaiFormData.append('language', language.toString());
-    }
-    
-    const prompt = formData.get('prompt');
-    if (prompt) {
-      openaiFormData.append('prompt', prompt.toString());
-    }
-    
-    const responseFormat = formData.get('response_format') || 'json';
-    openaiFormData.append('response_format', responseFormat.toString());
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('model', 'whisper-1');
     
     // Call OpenAI Whisper API
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -81,11 +72,17 @@ serve(async (req) => {
       headers: {
         'Authorization': `Bearer ${openaiApiKey}`,
       },
-      body: openaiFormData,
+      body: formData,
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        errorData = { message: await response.text() };
+      }
+      
       console.error('OpenAI API error:', errorData);
       
       return new Response(
@@ -121,7 +118,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         error: 'Failed to process transcription',
-        details: error.message,
+        details: error.message || String(error),
       }),
       {
         status: 500,
