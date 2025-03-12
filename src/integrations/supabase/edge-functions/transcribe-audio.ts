@@ -10,38 +10,6 @@ const corsHeaders = {
 // Maximum file size in bytes (10MB - to avoid memory issues)
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
-// Map of file extensions to MIME types that OpenAI accepts
-const mimeTypeMap = {
-  'mp3': 'audio/mpeg',
-  'mp4': 'video/mp4',
-  'mpeg': 'video/mpeg',
-  'mpga': 'audio/mpeg',
-  'm4a': 'audio/mp4',
-  'wav': 'audio/wav',
-  'webm': 'audio/webm',
-  'ogg': 'audio/ogg',
-  'oga': 'audio/ogg',
-  'flac': 'audio/flac'
-};
-
-// Get the correct MIME type based on file extension
-function getProperMimeType(fileName, providedType) {
-  const extension = fileName.split('.').pop().toLowerCase();
-  
-  if (extension && mimeTypeMap[extension]) {
-    return mimeTypeMap[extension];
-  }
-  
-  // If we can't determine from extension, use the provided type
-  // But ensure it's one of the supported types
-  if (providedType && Object.values(mimeTypeMap).includes(providedType)) {
-    return providedType;
-  }
-  
-  // Default to mp3 if we can't determine (most common audio format)
-  return 'audio/mpeg';
-}
-
 serve(async (req) => {
   // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
@@ -90,9 +58,9 @@ serve(async (req) => {
       );
     }
     
-    if (!requestData.fileData || !requestData.fileName || !requestData.fileType) {
+    if (!requestData.fileData || !requestData.fileName) {
       return new Response(
-        JSON.stringify({ error: { message: 'Missing file data, name, or type' } }),
+        JSON.stringify({ error: { message: 'Missing file data or name' } }),
         {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -118,38 +86,19 @@ serve(async (req) => {
       );
     }
     
-    // Get the proper MIME type for this file
-    const properMimeType = getProperMimeType(requestData.fileName, requestData.fileType);
-    console.log(`Original file type: ${requestData.fileType}, Using MIME type: ${properMimeType}`);
+    // Create a blob with the file data - always use mp3 MIME type for OpenAI
+    const fileBlob = new Blob([fileData], { type: 'audio/mpeg' });
     
-    // Create a blob with the file data
-    let fileBlob;
-    try {
-      fileBlob = new Blob([fileData], { type: properMimeType });
-    } catch (e) {
-      console.error('Error creating Blob:', e);
-      return new Response(
-        JSON.stringify({ 
-          error: { 
-            message: 'Error processing file data. Memory limit may have been exceeded.' 
-          }
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-    
-    // Create a File object from the Blob
-    const file = new File([fileBlob], requestData.fileName, { type: properMimeType });
+    // Create a File object from the Blob with .mp3 extension to ensure compatibility
+    const fileName = requestData.fileName.split('.')[0] + '.mp3';
+    const file = new File([fileBlob], fileName, { type: 'audio/mpeg' });
 
     // Prepare the form data for OpenAI API
     const formData = new FormData();
     formData.append('file', file);
     formData.append('model', 'whisper-1');
     
-    console.log(`Processing file: ${requestData.fileName}, size: ${fileData.length} bytes, type: ${properMimeType}`);
+    console.log(`Processing file: ${fileName}, size: ${fileData.length} bytes, type: audio/mpeg`);
     
     // Call OpenAI Whisper API
     let response;
@@ -189,37 +138,6 @@ serve(async (req) => {
       }
       
       console.error('OpenAI API error:', errorData);
-      
-      // Check for specific error types
-      if (response.status === 413 || (errorData.error && errorData.error.message && errorData.error.message.includes("file too large"))) {
-        return new Response(
-          JSON.stringify({ 
-            error: { 
-              message: "File too large. Maximum file size is 25MB." 
-            }
-          }),
-          {
-            status: 413,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
-      }
-      
-      // Handle format errors
-      if (errorData.error && errorData.error.message && errorData.error.message.includes("Invalid file format")) {
-        return new Response(
-          JSON.stringify({ 
-            error: { 
-              message: `Invalid file format. The file ${requestData.fileName} could not be processed. Supported formats: mp3, mp4, m4a, wav, webm, ogg, flac.`,
-              details: errorData.error.message
-            }
-          }),
-          {
-            status: 415, // Unsupported Media Type
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
-      }
       
       return new Response(
         JSON.stringify({ 
