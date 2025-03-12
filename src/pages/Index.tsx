@@ -14,6 +14,11 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 // Maximum chunk size for processing (2MB)
 const CHUNK_SIZE = 2 * 1024 * 1024;
 
+// Supported file formats
+const SUPPORTED_FORMATS = [
+  'mp3', 'mp4', 'm4a', 'wav', 'webm', 'ogg', 'flac', 'mpeg', 'mpga', 'oga'
+];
+
 const Index = () => {
   const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
@@ -21,6 +26,12 @@ const Index = () => {
   const [transcription, setTranscription] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("upload");
   const [fileError, setFileError] = useState<string | null>(null);
+
+  // Check if file format is supported
+  const isFormatSupported = (fileName: string) => {
+    const extension = fileName.split('.').pop()?.toLowerCase() || '';
+    return SUPPORTED_FORMATS.includes(extension);
+  };
 
   const handleTranscribe = async () => {
     if (!file) {
@@ -37,6 +48,16 @@ const Index = () => {
       toast({
         title: "File too large",
         description: `Maximum file size is ${MAX_FILE_SIZE / (1024 * 1024)}MB. Please upload a smaller file or compress this one.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check file format
+    if (!isFormatSupported(file.name)) {
+      toast({
+        title: "Unsupported file format",
+        description: `The file format is not supported. Please upload a file in one of these formats: ${SUPPORTED_FORMATS.join(', ')}`,
         variant: "destructive",
       });
       return;
@@ -135,6 +156,8 @@ const Index = () => {
         setFileError(`File exceeds the ${MAX_FILE_SIZE / (1024 * 1024)}MB limit. Please upload a smaller file.`);
       } else if (error.message?.includes("memory limit exceeded")) {
         setFileError("Server memory limit exceeded. Please try a smaller file.");
+      } else if (error.message?.includes("Invalid file format")) {
+        setFileError(`Unsupported file format. Please use one of these formats: ${SUPPORTED_FORMATS.join(', ')}`);
       }
       
       toast({
@@ -161,7 +184,17 @@ const Index = () => {
           description: `Maximum file size is ${MAX_FILE_SIZE / (1024 * 1024)}MB. Please upload a smaller file or compress this one.`,
           variant: "destructive",
         });
-      } else {
+      } 
+      // Check file format
+      else if (!isFormatSupported(uploadedFile.name)) {
+        setFileError(`Unsupported file format. Please use one of these formats: ${SUPPORTED_FORMATS.join(', ')}`);
+        toast({
+          title: "Unsupported file format",
+          description: `Please upload a file in one of these formats: ${SUPPORTED_FORMATS.join(', ')}`,
+          variant: "destructive",
+        });
+      }
+      else {
         toast({
           title: "File selected",
           description: `${uploadedFile.name} is ready for transcription.`,
@@ -221,8 +254,8 @@ const Index = () => {
                     onFileChange={handleFileChange} 
                     file={file}
                     acceptedFileTypes={{
-                      'audio/*': ['.mp3', '.wav', '.m4a', '.flac', '.aac'],
-                      'video/*': ['.mp4', '.mov', '.avi', '.mkv']
+                      'audio/*': ['.mp3', '.wav', '.m4a', '.flac', '.aac', '.ogg', '.oga', '.mpga'],
+                      'video/*': ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.mpeg']
                     }}
                     maxFileSize={MAX_FILE_SIZE}
                   />

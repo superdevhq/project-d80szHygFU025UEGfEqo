@@ -10,6 +10,38 @@ const corsHeaders = {
 // Maximum file size in bytes (10MB - to avoid memory issues)
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
+// Map of file extensions to MIME types that OpenAI accepts
+const mimeTypeMap = {
+  'mp3': 'audio/mpeg',
+  'mp4': 'video/mp4',
+  'mpeg': 'video/mpeg',
+  'mpga': 'audio/mpeg',
+  'm4a': 'audio/mp4',
+  'wav': 'audio/wav',
+  'webm': 'audio/webm',
+  'ogg': 'audio/ogg',
+  'oga': 'audio/ogg',
+  'flac': 'audio/flac'
+};
+
+// Get the correct MIME type based on file extension
+function getProperMimeType(fileName, providedType) {
+  const extension = fileName.split('.').pop().toLowerCase();
+  
+  if (extension && mimeTypeMap[extension]) {
+    return mimeTypeMap[extension];
+  }
+  
+  // If we can't determine from extension, use the provided type
+  // But ensure it's one of the supported types
+  if (providedType && Object.values(mimeTypeMap).includes(providedType)) {
+    return providedType;
+  }
+  
+  // Default to mp3 if we can't determine (most common audio format)
+  return 'audio/mpeg';
+}
+
 serve(async (req) => {
   // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
@@ -86,10 +118,14 @@ serve(async (req) => {
       );
     }
     
+    // Get the proper MIME type for this file
+    const properMimeType = getProperMimeType(requestData.fileName, requestData.fileType);
+    console.log(`Original file type: ${requestData.fileType}, Using MIME type: ${properMimeType}`);
+    
     // Create a blob with the file data
     let fileBlob;
     try {
-      fileBlob = new Blob([fileData], { type: requestData.fileType });
+      fileBlob = new Blob([fileData], { type: properMimeType });
     } catch (e) {
       console.error('Error creating Blob:', e);
       return new Response(
@@ -106,14 +142,14 @@ serve(async (req) => {
     }
     
     // Create a File object from the Blob
-    const file = new File([fileBlob], requestData.fileName, { type: requestData.fileType });
+    const file = new File([fileBlob], requestData.fileName, { type: properMimeType });
 
     // Prepare the form data for OpenAI API
     const formData = new FormData();
     formData.append('file', file);
     formData.append('model', 'whisper-1');
     
-    console.log(`Processing file: ${requestData.fileName}, size: ${fileData.length} bytes, type: ${requestData.fileType}`);
+    console.log(`Processing file: ${requestData.fileName}, size: ${fileData.length} bytes, type: ${properMimeType}`);
     
     // Call OpenAI Whisper API
     let response;
@@ -164,6 +200,22 @@ serve(async (req) => {
           }),
           {
             status: 413,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      
+      // Handle format errors
+      if (errorData.error && errorData.error.message && errorData.error.message.includes("Invalid file format")) {
+        return new Response(
+          JSON.stringify({ 
+            error: { 
+              message: `Invalid file format. The file ${requestData.fileName} could not be processed. Supported formats: mp3, mp4, m4a, wav, webm, ogg, flac.`,
+              details: errorData.error.message
+            }
+          }),
+          {
+            status: 415, // Unsupported Media Type
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           }
         );
