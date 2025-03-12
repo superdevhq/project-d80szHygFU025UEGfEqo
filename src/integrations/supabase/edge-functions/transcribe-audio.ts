@@ -7,6 +7,9 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+// Maximum file size in bytes (25MB - OpenAI's limit)
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
+
 serve(async (req) => {
   // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
@@ -54,8 +57,24 @@ serve(async (req) => {
       );
     }
 
-    // Convert the array back to Uint8Array and then to a Blob
+    // Convert the array back to Uint8Array
     const fileData = new Uint8Array(requestData.fileData);
+    
+    // Check file size
+    if (fileData.length > MAX_FILE_SIZE) {
+      return new Response(
+        JSON.stringify({ 
+          error: { 
+            message: `File size (${fileData.length} bytes) exceeds the maximum allowed size (${MAX_FILE_SIZE} bytes)` 
+          }
+        }),
+        {
+          status: 413, // Payload Too Large
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+    
     const fileBlob = new Blob([fileData], { type: requestData.fileType });
     
     // Create a File object from the Blob
@@ -65,6 +84,8 @@ serve(async (req) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('model', 'whisper-1');
+    
+    console.log(`Processing file: ${requestData.fileName}, size: ${fileData.length} bytes, type: ${requestData.fileType}`);
     
     // Call OpenAI Whisper API
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -85,10 +106,24 @@ serve(async (req) => {
       
       console.error('OpenAI API error:', errorData);
       
+      // Check for specific error types
+      if (response.status === 413 || (errorData.error && errorData.error.message && errorData.error.message.includes("file too large"))) {
+        return new Response(
+          JSON.stringify({ 
+            error: { 
+              message: "File too large. Maximum file size is 25MB." 
+            }
+          }),
+          {
+            status: 413,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      
       return new Response(
         JSON.stringify({ 
-          error: 'Error from OpenAI API', 
-          details: errorData 
+          error: errorData 
         }),
         {
           status: response.status,
@@ -117,8 +152,10 @@ serve(async (req) => {
     
     return new Response(
       JSON.stringify({
-        error: 'Failed to process transcription',
-        details: error.message || String(error),
+        error: {
+          message: 'Failed to process transcription',
+          details: error.message || String(error),
+        }
       }),
       {
         status: 500,

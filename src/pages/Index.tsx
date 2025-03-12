@@ -9,12 +9,16 @@ import { supabase } from "@/integrations/supabase/client";
 import FileUploader from "@/components/FileUploader";
 import TranscriptionResult from "@/components/TranscriptionResult";
 
+// Maximum file size in bytes (25MB - OpenAI's limit)
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
+
 const Index = () => {
   const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcription, setTranscription] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("upload");
+  const [fileError, setFileError] = useState<string | null>(null);
 
   const handleTranscribe = async () => {
     if (!file) {
@@ -26,7 +30,18 @@ const Index = () => {
       return;
     }
 
+    // Check file size
+    if (file.size > MAX_FILE_SIZE) {
+      toast({
+        title: "File too large",
+        description: "Maximum file size is 25MB. Please upload a smaller file or compress this one.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsTranscribing(true);
+    setFileError(null);
     
     try {
       // Show a toast to indicate processing has started
@@ -48,7 +63,13 @@ const Index = () => {
       });
 
       if (error) {
-        throw new Error(error.message);
+        console.error("Supabase function error:", error);
+        throw new Error(error.message || "Error calling transcription service");
+      }
+
+      if (data.error) {
+        console.error("Transcription API error:", data.error);
+        throw new Error(data.error.message || "Error during transcription");
       }
 
       // Set the transcription result
@@ -64,6 +85,11 @@ const Index = () => {
     } catch (error) {
       console.error('Transcription error:', error);
       
+      // Handle specific error cases
+      if (error.message?.includes("file too large") || error.message?.includes("exceeds the maximum allowed size")) {
+        setFileError("File exceeds the 25MB limit. Please upload a smaller file.");
+      }
+      
       toast({
         title: "Transcription failed",
         description: error.message || "An error occurred during transcription.",
@@ -77,12 +103,23 @@ const Index = () => {
   const handleFileChange = (uploadedFile: File | null) => {
     setFile(uploadedFile);
     setTranscription(null);
+    setFileError(null);
     
     if (uploadedFile) {
-      toast({
-        title: "File selected",
-        description: `${uploadedFile.name} is ready for transcription.`,
-      });
+      // Check file size immediately
+      if (uploadedFile.size > MAX_FILE_SIZE) {
+        setFileError("File exceeds the 25MB limit. Please upload a smaller file.");
+        toast({
+          title: "File too large",
+          description: "Maximum file size is 25MB. Please upload a smaller file or compress this one.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "File selected",
+          description: `${uploadedFile.name} is ready for transcription.`,
+        });
+      }
     }
   };
 
@@ -111,6 +148,9 @@ const Index = () => {
             <p className="mt-4 text-lg text-muted-foreground">
               Upload your audio or video files and get accurate transcriptions powered by OpenAI's Whisper.
             </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Maximum file size: 25MB
+            </p>
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -126,7 +166,7 @@ const Index = () => {
                 <CardHeader>
                   <CardTitle>Upload your file</CardTitle>
                   <CardDescription>
-                    Supported formats: MP3, MP4, WAV, M4A, and more
+                    Supported formats: MP3, MP4, WAV, M4A, and more (max 25MB)
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -137,7 +177,14 @@ const Index = () => {
                       'audio/*': ['.mp3', '.wav', '.m4a', '.flac', '.aac'],
                       'video/*': ['.mp4', '.mov', '.avi', '.mkv']
                     }}
+                    maxFileSize={MAX_FILE_SIZE}
                   />
+                  
+                  {fileError && (
+                    <div className="mt-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                      {fileError}
+                    </div>
+                  )}
                 </CardContent>
                 <CardFooter className="flex justify-between">
                   <Button 
@@ -150,7 +197,7 @@ const Index = () => {
                   </Button>
                   <Button 
                     onClick={handleTranscribe} 
-                    disabled={!file || isTranscribing}
+                    disabled={!file || isTranscribing || !!fileError}
                     className="gap-2"
                     type="button"
                   >

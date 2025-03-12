@@ -8,12 +8,14 @@ interface FileUploaderProps {
   onFileChange: (file: File | null) => void;
   file: File | null;
   acceptedFileTypes?: Record<string, string[]>;
+  maxFileSize?: number;
 }
 
 const FileUploader = ({ 
   onFileChange, 
   file, 
-  acceptedFileTypes = { 'audio/*': [], 'video/*': [] } 
+  acceptedFileTypes = { 'audio/*': [], 'video/*': [] },
+  maxFileSize = Infinity
 }: FileUploaderProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -48,6 +50,12 @@ const FileUploader = ({
     // Check if file is audio or video
     const isAudio = selectedFile.type.startsWith('audio/');
     const isVideo = selectedFile.type.startsWith('video/');
+    
+    // Check file size
+    if (selectedFile.size > maxFileSize) {
+      onFileChange(selectedFile); // Still set the file so we can show the error in the parent component
+      return;
+    }
     
     if (isAudio || isVideo) {
       onFileChange(selectedFile);
@@ -85,6 +93,10 @@ const FileUploader = ({
       fileInputRef.current.click();
     }
   };
+
+  // Calculate file size status
+  const isFileTooLarge = file && file.size > maxFileSize;
+  const fileSizePercentage = file ? Math.min((file.size / maxFileSize) * 100, 100) : 0;
 
   return (
     <div className="w-full">
@@ -157,8 +169,19 @@ const FileUploader = ({
                 </Button>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-primary/10">
-                <div className="h-full w-full bg-primary" />
+                <div 
+                  className={cn(
+                    "h-full bg-primary transition-all",
+                    isFileTooLarge ? "bg-destructive" : "bg-primary"
+                  )} 
+                  style={{ width: `${fileSizePercentage}%` }}
+                />
               </div>
+              {isFileTooLarge && (
+                <p className="text-xs text-destructive mt-1">
+                  File size exceeds the {formatFileSize(maxFileSize)} limit
+                </p>
+              )}
             </div>
           </div>
         </div>
